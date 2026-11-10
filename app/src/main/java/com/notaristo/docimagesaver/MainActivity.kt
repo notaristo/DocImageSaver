@@ -6,6 +6,7 @@ import android.graphics.RuntimeShader
 import android.net.Uri
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.compose.setContent
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.RepeatMode
@@ -29,6 +30,10 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -52,12 +57,15 @@ import androidx.compose.ui.graphics.asComposeRenderEffect
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.lifecycleScope
+import android.graphics.Bitmap
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -71,14 +79,22 @@ class MainActivity : ComponentActivity() {
     private val activityMessages = mutableStateListOf<String>()
     private var savedCount by mutableIntStateOf(0)
     private var failedCount by mutableIntStateOf(0)
+    private var openMode by mutableStateOf("APP")
+    private var showLibrary by mutableStateOf(false)
+    private var showSettings by mutableStateOf(false)
+    private val galleryImages = mutableStateListOf<Pair<Uri, String>>()
+    private lateinit var multiPicker: androidx.activity.result.ActivityResultLauncher<Array<String>>
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         savedCount = getSharedPreferences("doc_image_saver", MODE_PRIVATE).getInt("saved_count", 0)
+        openMode = getSharedPreferences("doc_image_saver", MODE_PRIVATE).getString("open_mode", "APP") ?: "APP"
+        multiPicker = registerForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris -> if (uris.isNotEmpty()) saveIncoming(uris) }
+        refreshGallery()
         setContent {
             MaterialTheme {
                 Surface(modifier = Modifier.fillMaxSize(), color = Ink) {
-                    DocImageHome(savedCount, failedCount, activityMessages)
+                    DocImageHome(savedCount, failedCount, activityMessages, galleryImages, showLibrary, showSettings, openMode, { showLibrary = it; if (it) refreshGallery() }, { showSettings = it }, { mode -> openMode = mode; getSharedPreferences("doc_image_saver", MODE_PRIVATE).edit().putString("open_mode", mode).apply() }, { multiPicker.launch(arrayOf("*/*")) }, { uri -> openSavedImage(uri) })
                 }
             }
         }
@@ -118,10 +134,14 @@ class MainActivity : ComponentActivity() {
         }
         val incoming = (streams + clipUris).distinct()
         if (incoming.isEmpty()) return
+        saveIncoming(incoming)
+    }
+
+    private fun saveIncoming(incoming: List<Uri>) {
         lifecycleScope.launch {
             val results = withContext(Dispatchers.IO) {
                 val saver = ImageSaver(applicationContext)
-                incoming.map { saver.save(it) }
+                incoming.distinct().map { saver.save(it) }
             }
             results.forEach { result ->
                 if (result.success) {
@@ -135,7 +155,24 @@ class MainActivity : ComponentActivity() {
                     result.fileName + if (result.success) "" else " — " + result.message)
             }
             while (activityMessages.size > 12) activityMessages.removeAt(activityMessages.lastIndex)
-            results.firstOrNull { it.success && it.uri != null }?.uri?.let(::openSavedImage)
+            refreshGallery()
+            results.firstOrNull { it.success && it.uri != null }?.uri?.let { uri -> if (openMode == "GALLERY") openSavedImage(uri) else showLibrary = true }
+        }
+    }
+
+    private fun refreshGallery() {
+        lifecycleScope.launch {
+            val rows = withContext(Dispatchers.IO) {
+                val collection = android.provider.MediaStore.Images.Media.getContentUri(android.provider.MediaStore.VOLUME_EXTERNAL)
+                val result = mutableListOf<Pair<Uri, String>>()
+                contentResolver.query(collection, arrayOf(android.provider.MediaStore.Images.Media._ID, android.provider.MediaStore.Images.Media.DISPLAY_NAME), android.provider.MediaStore.Images.Media.RELATIVE_PATH + "=?", arrayOf("Pictures/Document Images/"), android.provider.MediaStore.Images.Media.DATE_ADDED + " DESC")?.use { cursor ->
+                    val id = cursor.getColumnIndexOrThrow(android.provider.MediaStore.Images.Media._ID)
+                    val name = cursor.getColumnIndexOrThrow(android.provider.MediaStore.Images.Media.DISPLAY_NAME)
+                    while (cursor.moveToNext()) result.add(Uri.withAppendedPath(collection, cursor.getLong(id).toString()) to cursor.getString(name))
+                }
+                result
+            }
+            galleryImages.clear(); galleryImages.addAll(rows)
         }
     }
 
@@ -153,7 +190,7 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-private fun DocImageHome(savedCount: Int, failedCount: Int, activityMessages: List<String>) {
+private fun DocImageHome(savedCount: Int, failedCount: Int, activityMessages: List<String>, galleryImages: List<Pair<Uri, String>>, showLibrary: Boolean, showSettings: Boolean, openMode: String, onLibrary: (Boolean) -> Unit, onSettings: (Boolean) -> Unit, onMode: (String) -> Unit, onImport: () -> Unit, onOpen: (Uri) -> Unit) {
     val transition = rememberInfiniteTransition(label = "ambient")
     val drift by transition.animateFloat(
         initialValue = 0f,
@@ -253,6 +290,68 @@ private fun DocImageHome(savedCount: Int, failedCount: Int, activityMessages: Li
                 }
             }
 
+            Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(Color(0x252B3152)).padding(4.dp)) {
+                listOf("HOME", "LIBRARY", "SETTINGS").forEach { tab ->
+                    val active = (tab == "LIBRARY" && showLibrary) || (tab == "SETTINGS" && showSettings) || (tab == "HOME" && !showLibrary && !showSettings)
+                    Box(Modifier.weight(1f).clip(RoundedCornerShape(13.dp)).background(if (active) Color(0x665F5A9D) else Color.Transparent)
+                        .pointerInput(tab) { detectTapGestures(onTap = { onLibrary(tab == "LIBRARY"); onSettings(tab == "SETTINGS") }) }
+                        .padding(vertical = 11.dp), contentAlignment = Alignment.Center) {
+                        Text(if (tab == "HOME") "Home" else if (tab == "LIBRARY") "My images" else "Settings", color = if (active) Color.White else Muted, fontSize = 12.sp)
+                    }
+                }
+            }
+            if (showLibrary) {
+                Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                    Text("YOUR LIBRARY", color = Color(0xFFC5B9FF), fontSize = 9.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.8.sp)
+                    Text("Shared images", color = Color.White, fontSize = 27.sp, fontWeight = FontWeight.SemiBold)
+                    Text("${galleryImages.size} images saved in Document Images", color = Muted, fontSize = 11.sp)
+                    if (galleryImages.isEmpty()) {
+                        GlassPanel(Modifier.fillMaxWidth(), RoundedCornerShape(22.dp), Cyan) {
+                            Column(Modifier.fillMaxWidth().padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                                Text("▧", color = Cyan, fontSize = 36.sp)
+                                Text("Your library is empty", color = Color.White, fontSize = 15.sp)
+                                Text("Shared or imported images will appear here.", color = Muted, fontSize = 11.sp)
+                            }
+                        }
+                    } else {
+                        LazyVerticalGrid(columns = GridCells.Fixed(2), modifier = Modifier.fillMaxWidth().height(520.dp),
+                            verticalArrangement = Arrangement.spacedBy(12.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                            items(galleryImages, key = { it.first.toString() }) { pair -> SavedImageCard(pair.first, pair.second, onOpen) }
+                        }
+                    }
+                    Text("+ Select multiple files", color = Cyan, fontSize = 12.sp,
+                        modifier = Modifier.pointerInput(Unit) { detectTapGestures(onTap = { onImport() }) }.padding(8.dp))
+                }
+            } else if (showSettings) {
+                Column(verticalArrangement = Arrangement.spacedBy(15.dp)) {
+                    Text("PREFERENCES", color = Color(0xFFC5B9FF), fontSize = 9.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.8.sp)
+                    Text("Settings", color = Color.White, fontSize = 28.sp, fontWeight = FontWeight.SemiBold)
+                    GlassPanel(Modifier.fillMaxWidth(), RoundedCornerShape(23.dp), Violet) {
+                        Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                            Text("After saving images", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                            Text("Choose where the app takes you after a successful save.", color = Muted, fontSize = 11.sp)
+                            Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Color(0x33272B4B)).padding(4.dp)) {
+                                listOf("APP", "GALLERY").forEach { mode ->
+                                    val active = openMode == mode
+                                    Box(Modifier.weight(1f).clip(RoundedCornerShape(11.dp)).background(if (active) Color(0x775F5A9D) else Color.Transparent)
+                                        .pointerInput(mode) { detectTapGestures(onTap = { onMode(mode) }) }
+                                        .padding(vertical = 12.dp), contentAlignment = Alignment.Center) {
+                                        Text(if (mode == "APP") "View in app" else "Open gallery", color = if (active) Color.White else Muted, fontSize = 11.sp)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    GlassPanel(Modifier.fillMaxWidth(), RoundedCornerShape(22.dp), Cyan) {
+                        Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text("Batch import", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                            Text("Select several image files or image documents from Android's file picker, even when the sharing app only allows one document at a time.", color = Muted, fontSize = 11.sp, lineHeight = 17.sp)
+                            Text("＋ Choose multiple files", color = Cyan, fontSize = 12.sp,
+                                modifier = Modifier.pointerInput(Unit) { detectTapGestures(onTap = { onImport() }) }.padding(vertical = 7.dp))
+                        }
+                    }
+                }
+            } else {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text("A calmer home\nfor every image.", color = Color.White, fontSize = 36.sp, lineHeight = 42.sp, fontWeight = FontWeight.SemiBold, letterSpacing = (-1.1).sp)
                 Text(
@@ -331,6 +430,7 @@ private fun DocImageHome(savedCount: Int, failedCount: Int, activityMessages: Li
                 }
             }
 
+            }
             Row(
                 Modifier.fillMaxWidth().padding(top = 2.dp, bottom = 24.dp),
                 horizontalArrangement = Arrangement.Center,
@@ -342,6 +442,25 @@ private fun DocImageHome(savedCount: Int, failedCount: Int, activityMessages: Li
                 Spacer(Modifier.width(8.dp))
                 Text("✦", color = Color(0xFF77D9E9), fontSize = 11.sp)
             }
+        }
+    }
+}
+
+@Composable
+private fun SavedImageCard(uri: Uri, name: String, onOpen: (Uri) -> Unit) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val bitmap by androidx.compose.runtime.produceState<Bitmap?>(initialValue = null, uri) {
+        value = withContext(Dispatchers.IO) {
+            try { context.contentResolver.loadThumbnail(uri, android.util.Size(420, 420), null) }
+            catch (_: Exception) { null }
+        }
+    }
+    GlassPanel(Modifier.fillMaxWidth().pointerInput(uri) { detectTapGestures(onTap = { onOpen(uri) }) }, RoundedCornerShape(18.dp), Violet) {
+        Column {
+            if (bitmap != null) Image(bitmap!!.asImageBitmap(), contentDescription = name,
+                modifier = Modifier.fillMaxWidth().height(150.dp).clip(RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp)), contentScale = ContentScale.Crop)
+            else Box(Modifier.fillMaxWidth().height(150.dp).background(Color(0x332B3152)), contentAlignment = Alignment.Center) { Text("▧", color = Cyan, fontSize = 30.sp) }
+            Text(name, color = Color.White, fontSize = 10.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(10.dp))
         }
     }
 }
