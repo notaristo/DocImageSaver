@@ -1,40 +1,63 @@
 package com.notaristo.docimagesaver
 
+import android.content.ClipData
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+
+private val Ink = Color(0xFF080A17)
+private val Muted = Color(0xFFAAAFC9)
+private val Cyan = Color(0xFF91E9FF)
+private val Violet = Color(0xFFB7A0FF)
 
 class MainActivity : ComponentActivity() {
     private val activityMessages = mutableStateListOf<String>()
@@ -45,46 +68,8 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         setContent {
             MaterialTheme {
-                Surface(modifier = Modifier.fillMaxSize(), color = Color(0xFF090B16)) {
-                    Column(
-                        modifier = Modifier.fillMaxSize()
-                            .background(Brush.verticalGradient(listOf(Color(0xFF17152E), Color(0xFF0B0D19), Color(0xFF090B16))))
-                            .padding(22.dp),
-                        verticalArrangement = Arrangement.spacedBy(18.dp)
-                    ) {
-                        Spacer(Modifier.height(12.dp))
-                        Text("DOC IMAGE SAVER", color = Color(0xFFB8B8D8), fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 2.4.sp)
-                        Text("Every document.\nOne safe place.", color = Color.White, fontSize = 32.sp, lineHeight = 38.sp, fontWeight = FontWeight.SemiBold)
-                        Text(
-                            "Share an image from WhatsApp or any other app to save it directly into your gallery.",
-                            color = Color(0xFFB9BCD0), fontSize = 15.sp, lineHeight = 23.sp
-                        )
-                        Card(
-                            modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(26.dp),
-                            colors = CardDefaults.cardColors(containerColor = Color(0xFF24233D))
-                        ) {
-                            Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                                Text("YOUR GALLERY FOLDER", color = Color(0xFFB8B8D8), fontSize = 11.sp, letterSpacing = 1.5.sp)
-                                Text("Pictures / Document Images", color = Color.White, fontSize = 19.sp, fontWeight = FontWeight.SemiBold)
-                                Text("Files are copied without resizing, recompression or format conversion.", color = Color(0xFFB9BCD0), fontSize = 13.sp, lineHeight = 19.sp)
-                            }
-                        }
-                        Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
-                            CounterCard("SAVED", savedCount.toString(), Modifier.weight(1f))
-                            CounterCard("FAILED", failedCount.toString(), Modifier.weight(1f))
-                        }
-                        Text("RECENT ACTIVITY", color = Color(0xFFB8B8D8), fontSize = 11.sp, letterSpacing = 1.5.sp)
-                        if (activityMessages.isEmpty()) {
-                            Text("Nothing saved yet. Open a chat, select an image, and tap Share → DocImageSaver.", color = Color(0xFF9296B0), fontSize = 14.sp, lineHeight = 21.sp)
-                        } else {
-                            activityMessages.take(5).forEach { message ->
-                                Text(message, color = Color.White, fontSize = 13.sp)
-                            }
-                        }
-                        Spacer(Modifier.weight(1f))
-                        Text("ORIGINAL FILE BYTES PRESERVED", color = Color(0xFF8D8BAF), fontSize = 10.sp, letterSpacing = 1.7.sp, modifier = Modifier.align(Alignment.CenterHorizontally))
-                    }
+                Surface(modifier = Modifier.fillMaxSize(), color = Ink) {
+                    DocImageHome(savedCount, failedCount, activityMessages)
                 }
             }
         }
@@ -99,7 +84,7 @@ class MainActivity : ComponentActivity() {
 
     private fun handleShareIntent(intent: Intent?) {
         if (intent == null) return
-        val incoming = when (intent.action) {
+        val streams = when (intent.action) {
             Intent.ACTION_SEND -> listOfNotNull(
                 if (android.os.Build.VERSION.SDK_INT >= 33) intent.getParcelableExtra(Intent.EXTRA_STREAM, Uri::class.java)
                 else {
@@ -108,42 +93,222 @@ class MainActivity : ComponentActivity() {
                 }
             )
             Intent.ACTION_SEND_MULTIPLE -> {
-                val streams = if (android.os.Build.VERSION.SDK_INT >= 33) {
-                    intent.getParcelableArrayListExtra(Intent.EXTRA_STREAM, Uri::class.java)
-                } else {
+                if (android.os.Build.VERSION.SDK_INT >= 33) intent.getParcelableArrayListExtra(Intent.EXTRA_STREAM, Uri::class.java).orEmpty()
+                else {
                     @Suppress("DEPRECATION")
-                    intent.getParcelableArrayListExtra<Uri>(Intent.EXTRA_STREAM)
+                    intent.getParcelableArrayListExtra<Uri>(Intent.EXTRA_STREAM).orEmpty()
                 }
-                streams.orEmpty()
             }
             else -> emptyList()
         }
+        val clipUris = buildList {
+            val clip = intent.clipData
+            if (clip != null) for (index in 0 until clip.itemCount) {
+                clip.getItemAt(index).uri?.let(::add)
+            }
+        }
+        val incoming = (streams + clipUris).distinct()
         if (incoming.isEmpty()) return
         lifecycleScope.launch {
             val results = withContext(Dispatchers.IO) {
                 val saver = ImageSaver(applicationContext)
-                incoming.distinct().map { saver.save(it) }
+                incoming.map { saver.save(it) }
             }
             results.forEach { result ->
                 if (result.success) savedCount++ else failedCount++
-                activityMessages.add(0, (if (result.success) "✓ " else "✕ ") + result.fileName +
-                    if (result.success) "" else ": " + result.message)
+                activityMessages.add(0, (if (result.success) "Saved  ·  " else "Could not save  ·  ") +
+                    result.fileName + if (result.success) "" else " — " + result.message)
             }
             while (activityMessages.size > 12) activityMessages.removeAt(activityMessages.lastIndex)
         }
     }
 }
 
-@androidx.compose.runtime.Composable
-private fun CounterCard(label: String, value: String, modifier: Modifier = Modifier) {
-    Card(
-        modifier = modifier,
-        shape = RoundedCornerShape(20.dp),
-        colors = CardDefaults.cardColors(containerColor = Color(0xFF191A2C))
+@Composable
+private fun DocImageHome(savedCount: Int, failedCount: Int, activityMessages: List<String>) {
+    val transition = rememberInfiniteTransition(label = "ambient")
+    val drift by transition.animateFloat(
+        initialValue = 0f,
+        targetValue = 24f,
+        animationSpec = infiniteRepeatable(tween(7000, easing = FastOutSlowInEasing), RepeatMode.Reverse),
+        label = "glowDrift"
+    )
+
+    Box(
+        Modifier.fillMaxSize()
+            .background(Brush.verticalGradient(listOf(Color(0xFF17152F), Color(0xFF0D1021), Ink)))
     ) {
-        Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-            Text(value, color = Color.White, fontSize = 27.sp, fontWeight = FontWeight.SemiBold)
-            Text(label, color = Color(0xFF9C9FB9), fontSize = 10.sp, letterSpacing = 1.5.sp)
+        Box(
+            Modifier.offset(x = 190.dp + drift.dp, y = (-95).dp)
+                .size(270.dp)
+                .background(Brush.radialGradient(listOf(Color(0x665B4BC2), Color.Transparent)), CircleShape)
+        )
+        Box(
+            Modifier.offset(x = (-135).dp, y = 360.dp - drift.dp)
+                .size(280.dp)
+                .background(Brush.radialGradient(listOf(Color(0x3341B7D6), Color.Transparent)), CircleShape)
+        )
+
+        Column(
+            Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 22.dp),
+            verticalArrangement = Arrangement.spacedBy(21.dp)
+        ) {
+            Spacer(Modifier.height(24.dp))
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(11.dp)) {
+                Box(
+                    Modifier.size(42.dp).shadow(18.dp, CircleShape)
+                        .background(Brush.linearGradient(listOf(Color(0xFFB8A6FF), Color(0xFF65DDF3))), CircleShape)
+                        .padding(1.dp).clip(CircleShape).background(Color(0xFF17172D)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text("D", color = Color.White, fontSize = 21.sp, fontWeight = FontWeight.Bold)
+                }
+                Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
+                    Text("DOC IMAGE SAVER", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 2.sp)
+                    Text("YOUR PRIVATE IMAGE LIBRARY", color = Muted, fontSize = 9.sp, letterSpacing = 1.45.sp)
+                }
+                Spacer(Modifier.weight(1f))
+                Box(
+                    Modifier.clip(CircleShape).background(Color(0x222DE0C1))
+                        .border(1.dp, Color(0x5549E5C7), CircleShape).padding(horizontal = 11.dp, vertical = 7.dp)
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Box(Modifier.size(6.dp).background(Color(0xFF6CF0C8), CircleShape))
+                        Text("READY", color = Color(0xFF9AF0D8), fontSize = 9.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+                    }
+                }
+            }
+
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text("A calmer home
+for every image.", color = Color.White, fontSize = 36.sp, lineHeight = 42.sp, fontWeight = FontWeight.SemiBold, letterSpacing = (-1.1).sp)
+                Text(
+                    "Keep the images that matter. Share from WhatsApp or any app and let them settle into one beautifully organised place.",
+                    color = Muted, fontSize = 14.sp, lineHeight = 22.sp
+                )
+            }
+
+            GlassPanel(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(30.dp),
+                accent = Color(0xFF9D8BFF)
+            ) {
+                Column(Modifier.padding(21.dp), verticalArrangement = Arrangement.spacedBy(17.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Text("YOUR COLLECTION", color = Color(0xFFC5B9FF), fontSize = 9.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.8.sp)
+                            Text("Document Images", color = Color.White, fontSize = 23.sp, fontWeight = FontWeight.SemiBold, letterSpacing = (-0.4).sp)
+                            Text("Pictures  /  Document Images", color = Color(0xFFB9B8D1), fontSize = 11.sp)
+                        }
+                        Box(
+                            Modifier.size(66.dp).background(
+                                Brush.linearGradient(listOf(Color(0x557E6BDF), Color(0x222FD0E7))),
+                                RoundedCornerShape(22.dp)
+                            ).border(1.dp, Color(0x557F91E9), RoundedCornerShape(22.dp)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text("▧", color = Color(0xFFD8D0FF), fontSize = 34.sp)
+                        }
+                    }
+                    Box(Modifier.fillMaxWidth().height(1.dp).background(Brush.horizontalGradient(listOf(Color.Transparent, Color(0x55FFFFFF), Color.Transparent))))
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(9.dp)) {
+                        Box(Modifier.size(25.dp).background(Color(0x332EDBC5), CircleShape), contentAlignment = Alignment.Center) {
+                            Text("✓", color = Color(0xFF8CEBD7), fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                        }
+                        Text("Original file bytes. No resizing. No recompression.", color = Color(0xFFD3D5E7), fontSize = 11.sp, lineHeight = 16.sp)
+                    }
+                }
+            }
+
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
+                StatPanel("SAVED", savedCount.toString(), "In your gallery", Modifier.weight(1f), Color(0xFF7DE7D0))
+                StatPanel("NEEDS ATTENTION", failedCount.toString(), "Unsuccessful", Modifier.weight(1f), Color(0xFFFFA8B8))
+            }
+
+            Column(verticalArrangement = Arrangement.spacedBy(11.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("RECENT ACTIVITY", color = Color(0xFFC7C5E0), fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.8.sp)
+                    Spacer(Modifier.weight(1f))
+                    Text("LATEST FIRST", color = Color(0xFF777D9D), fontSize = 8.sp, letterSpacing = 1.2.sp)
+                }
+                GlassPanel(Modifier.fillMaxWidth(), RoundedCornerShape(23.dp), Color(0xFF75D8E8)) {
+                    if (activityMessages.isEmpty()) {
+                        Row(Modifier.padding(17.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(13.dp)) {
+                            Box(Modifier.size(40.dp).background(Color(0x223FBDD5), CircleShape), contentAlignment = Alignment.Center) {
+                                Text("✧", color = Cyan, fontSize = 22.sp)
+                            }
+                            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Text("Your story starts here", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                                Text("Open a chat, choose an image, then Share → DocImageSaver.", color = Muted, fontSize = 10.sp, lineHeight = 15.sp)
+                            }
+                        }
+                    } else {
+                        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                            activityMessages.take(5).forEachIndexed { index, message ->
+                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(9.dp)) {
+                                    Box(Modifier.size(7.dp).background(if (message.startsWith("Saved")) Color(0xFF6DE4C6) else Color(0xFFFF9AAE), CircleShape))
+                                    Text(message, color = Color(0xFFE3E4F1), fontSize = 11.sp, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                                }
+                                if (index != activityMessages.take(5).lastIndex) {
+                                    Box(Modifier.fillMaxWidth().height(1.dp).background(Color(0x18FFFFFF)))
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            Row(
+                Modifier.fillMaxWidth().padding(top = 2.dp, bottom = 24.dp),
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("✦", color = Color(0xFF9D8BFF), fontSize = 11.sp)
+                Spacer(Modifier.width(8.dp))
+                Text("MADE TO KEEP EVERY DETAIL", color = Color(0xFF8589A8), fontSize = 9.sp, letterSpacing = 1.7.sp)
+                Spacer(Modifier.width(8.dp))
+                Text("✦", color = Color(0xFF77D9E9), fontSize = 11.sp)
+            }
+        }
+    }
+}
+
+@Composable
+private fun GlassPanel(
+    modifier: Modifier = Modifier,
+    shape: RoundedCornerShape,
+    accent: Color,
+    content: @Composable () -> Unit
+) {
+    Box(
+        modifier.shadow(22.dp, shape)
+            .clip(shape)
+            .background(
+                Brush.linearGradient(
+                    listOf(Color(0x35FFFFFF), Color(0x17A5A4FF), Color(0x0DFFFFFF), Color(0x222D426A))
+                )
+            )
+            .background(Brush.verticalGradient(listOf(Color(0x16FFFFFF), Color(0x080A1428), Color(0x1AFFFFFF))))
+            .border(BorderStroke(1.dp, Brush.linearGradient(listOf(Color(0x88FFFFFF), accent.copy(alpha = 0.38f), Color(0x20FFFFFF)))), shape)
+    ) {
+        Box {
+            Box(
+                Modifier.fillMaxWidth().height(1.dp)
+                    .background(Brush.horizontalGradient(listOf(Color.Transparent, Color(0x99FFFFFF), Color.Transparent)))
+                    .align(Alignment.TopCenter)
+            )
+            content()
+        }
+    }
+}
+
+@Composable
+private fun StatPanel(label: String, value: String, caption: String, modifier: Modifier, tint: Color) {
+    GlassPanel(modifier, RoundedCornerShape(23.dp), tint) {
+        Column(Modifier.padding(horizontal = 16.dp, vertical = 17.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+            Text(label, color = Color(0xFFB3B6D0), fontSize = 8.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.1.sp, maxLines = 1)
+            Text(value, color = Color.White, fontSize = 30.sp, fontWeight = FontWeight.SemiBold, letterSpacing = (-1).sp)
+            Text(caption, color = Color(0xFF8F95B3), fontSize = 10.sp)
         }
     }
 }
