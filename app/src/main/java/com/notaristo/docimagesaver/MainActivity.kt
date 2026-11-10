@@ -218,8 +218,7 @@ private fun DocImageHome(savedCount: Int, failedCount: Int, activityMessages: Li
             }
 
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text("A calmer home
-for every image.", color = Color.White, fontSize = 36.sp, lineHeight = 42.sp, fontWeight = FontWeight.SemiBold, letterSpacing = (-1.1).sp)
+                Text("A calmer home\nfor every image.", color = Color.White, fontSize = 36.sp, lineHeight = 42.sp, fontWeight = FontWeight.SemiBold, letterSpacing = (-1.1).sp)
                 Text(
                     "Keep the images that matter. Share from WhatsApp or any app and let them settle into one beautifully organised place.",
                     color = Muted, fontSize = 14.sp, lineHeight = 22.sp
