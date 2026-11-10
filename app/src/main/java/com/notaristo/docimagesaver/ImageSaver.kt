@@ -17,9 +17,7 @@ class ImageSaver(private val context: Context) {
         val reportedMime = resolver.getType(uri)
         val mimeType = when {
             reportedMime?.startsWith("image/") == true -> reportedMime
-            reportedMime == null || reportedMime == "application/octet-stream" || reportedMime == "application/binary" ->
-                displayNameFromSource?.let(::mimeTypeFromName)
-            else -> null
+            else -> displayNameFromSource?.let(::mimeTypeFromName)
         } ?: return SaveResult(displayNameFromSource ?: "Unknown file", false, "The selected file is not a supported image.")
 
         val safeName = makeSafeFileName(displayNameFromSource ?: ("Shared image" + extensionFor(mimeType)))
