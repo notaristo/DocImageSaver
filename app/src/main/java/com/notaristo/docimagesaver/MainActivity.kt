@@ -311,7 +311,7 @@ private fun DocImageHome(savedCount: Int, failedCount: Int, activityMessages: Li
 
     Box(
         Modifier.fillMaxSize()
-            .background(Brush.verticalGradient(listOf(Color(0xFF17152F), Color(0xFF0D1021), Ink)))
+            .background(Brush.linearGradient(listOf(Color(0xFF242044), Color(0xFF111A31), Color(0xFF080A17))))
             .graphicsLayer {
                 if (android.os.Build.VERSION.SDK_INT >= 33 && backdropShader != null) {
                     backdropShader.setFloatUniform("resolution", size.width.coerceAtLeast(1f), size.height.coerceAtLeast(1f))
@@ -326,12 +326,12 @@ private fun DocImageHome(savedCount: Int, failedCount: Int, activityMessages: Li
         Box(
             Modifier.offset(x = 190.dp + drift.dp, y = (-95).dp)
                 .size(270.dp)
-                .background(Brush.radialGradient(listOf(Color(0x665B4BC2), Color.Transparent)), CircleShape)
+                .background(Brush.radialGradient(listOf(Color(0x885E52D8), Color(0x3345C9E8), Color.Transparent)), CircleShape)
         )
         Box(
             Modifier.offset(x = (-135).dp, y = 360.dp - drift.dp)
                 .size(280.dp)
-                .background(Brush.radialGradient(listOf(Color(0x3341B7D6), Color.Transparent)), CircleShape)
+                .background(Brush.radialGradient(listOf(Color(0x5550D7E8), Color(0x224E65D9), Color.Transparent)), CircleShape)
         )
 
         Column(
@@ -573,9 +573,19 @@ private fun GlassPanel(
 ) {
     val pressed = remember { mutableStateOf(false) }
     val warp by animateFloatAsState(
-        targetValue = if (pressed.value) 1.4f else 1f,
-        animationSpec = tween(300, easing = FastOutSlowInEasing),
+        targetValue = if (pressed.value) 1.65f else 1.12f,
+        animationSpec = tween(420, easing = FastOutSlowInEasing),
         label = "glassDisplacement"
+    )
+    val liquid = rememberInfiniteTransition(label = "liquidGlass")
+    val flow by liquid.animateFloat(
+        initialValue = -0.35f,
+        targetValue = 1.35f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(7200, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "glassFlow"
     )
     val shader = remember {
         if (android.os.Build.VERSION.SDK_INT >= 33) {
@@ -584,6 +594,7 @@ private fun GlassPanel(
                 uniform shader content;
                 uniform float2 resolution;
                 uniform float uScale;
+                uniform float uTime;
                 float hash21(float2 p) {
                     p = fract(p * float2(123.34, 456.21));
                     p += dot(p, p + 45.32);
@@ -598,16 +609,16 @@ private fun GlassPanel(
                 }
                 half4 main(float2 coord) {
                     float2 uv = coord / resolution;
-                    float n1 = noise2(uv * 18.0);
-                    float n2 = noise2(uv * 37.0 + 8.4);
+                    float n1 = noise2(uv * 10.0 + float2(uTime, -uTime * 0.42));
+                    float n2 = noise2(uv * 23.0 + float2(-uTime * 0.7, uTime * 0.55));
                     float2 field = float2(n1 - 0.5, n2 - 0.5);
-                    float2 offset = field * (uScale - 1.0) * 3.2;
+                    float2 offset = field * (uScale - 1.0) * 9.0;
                     half4 center = content.eval(coord + offset);
-                    half4 blurA = content.eval(coord + offset + float2(1.0, 0.0));
-                    half4 blurB = content.eval(coord + offset + float2(-1.0, 0.0));
-                    half4 blurC = content.eval(coord + offset + float2(0.0, 1.0));
-                    half4 blurD = content.eval(coord + offset + float2(0.0, -1.0));
-                    return center * 0.72 + (blurA + blurB + blurC + blurD) * 0.07;
+                    half4 blurA = content.eval(coord + offset + float2(1.5, 0.0));
+                    half4 blurB = content.eval(coord + offset + float2(-1.5, 0.0));
+                    half4 blurC = content.eval(coord + offset + float2(0.0, 1.5));
+                    half4 blurD = content.eval(coord + offset + float2(0.0, -1.5));
+                    return center * 0.76 + (blurA + blurB + blurC + blurD) * 0.06;
                 }
                 """.trimIndent()
             )
@@ -615,9 +626,23 @@ private fun GlassPanel(
     }
 
     Box(
-        modifier.shadow(22.dp, shape)
+        modifier
+            .shadow(28.dp, shape)
             .clip(shape)
-            .border(BorderStroke(1.dp, Brush.linearGradient(listOf(Color(0x88FFFFFF), accent.copy(alpha = 0.38f), Color(0x20FFFFFF)))), shape)
+            .border(
+                BorderStroke(
+                    1.dp,
+                    Brush.linearGradient(
+                        listOf(
+                            Color(0xD9FFFFFF),
+                            accent.copy(alpha = 0.52f),
+                            Color(0x25FFFFFF),
+                            Color(0x7097CFFF)
+                        )
+                    )
+                ),
+                shape
+            )
             .pointerInput(Unit) {
                 detectTapGestures(
                     onPress = {
@@ -629,31 +654,69 @@ private fun GlassPanel(
             }
     ) {
         Box(
-            Modifier.matchParentSize()
+            Modifier
+                .matchParentSize()
                 .background(
                     Brush.linearGradient(
-                        listOf(Color(0x35FFFFFF), Color(0x17A5A4FF), Color(0x0DFFFFFF), Color(0x222D426A))
+                        listOf(
+                            Color(0x48FFFFFF),
+                            Color(0x20A5A4FF),
+                            Color(0x1239D8F2),
+                            Color(0x2A18243F)
+                        )
                     )
                 )
-                .background(Brush.verticalGradient(listOf(Color(0x16FFFFFF), Color(0x080A1428), Color(0x1AFFFFFF))))
+                .background(
+                    Brush.radialGradient(
+                        colors = listOf(accent.copy(alpha = 0.16f), Color.Transparent),
+                        radius = 520f
+                    )
+                )
                 .graphicsLayer {
                     if (android.os.Build.VERSION.SDK_INT >= 33 && shader != null) {
                         shader.setFloatUniform("resolution", size.width.coerceAtLeast(1f), size.height.coerceAtLeast(1f))
                         shader.setFloatUniform("uScale", warp)
+                        shader.setFloatUniform("uTime", flow * 2.4f)
                         renderEffect = android.graphics.RenderEffect
                             .createRuntimeShaderEffect(shader, "content")
                             .asComposeRenderEffect()
                     }
                 }
         )
-        Box {
+        Box(Modifier.matchParentSize()) {
             Box(
-                Modifier.fillMaxWidth().height(1.dp)
-                    .background(Brush.horizontalGradient(listOf(Color.Transparent, Color(0x99FFFFFF), Color.Transparent)))
+                Modifier
+                    .fillMaxWidth()
+                    .height(1.dp)
+                    .background(
+                        Brush.horizontalGradient(
+                            listOf(
+                                Color.Transparent,
+                                Color(0xCCFFFFFF),
+                                accent.copy(alpha = 0.65f),
+                                Color(0x66FFFFFF),
+                                Color.Transparent
+                            ),
+                            startX = flow * 900f,
+                            endX = flow * 900f + 650f
+                        )
+                    )
                     .align(Alignment.TopCenter)
             )
-            content()
+            Box(
+                Modifier
+                    .fillMaxWidth(0.62f)
+                    .height(54.dp)
+                    .align(Alignment.TopCenter)
+                    .background(
+                        Brush.verticalGradient(
+                            listOf(Color(0x22FFFFFF), Color.Transparent)
+                        ),
+                        RoundedCornerShape(bottomStart = 80.dp, bottomEnd = 80.dp)
+                    )
+            )
         }
+        Box { content() }
     }
 }
 
