@@ -5,6 +5,10 @@ import android.content.Intent
 import android.graphics.RuntimeShader
 import android.net.Uri
 import android.os.Bundle
+import android.provider.DocumentsContract
+import android.provider.OpenableColumns
+import android.provider.Settings
+import android.graphics.Color as AndroidColor
 import androidx.activity.ComponentActivity
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.compose.setContent
@@ -85,27 +89,64 @@ class MainActivity : ComponentActivity() {
     private val galleryImages = mutableStateListOf<Pair<Uri, String>>()
     private var selectedImage by mutableStateOf<Pair<Uri, String>?>(null)
     private lateinit var multiPicker: androidx.activity.result.ActivityResultLauncher<Array<String>>
+    private lateinit var folderPicker: androidx.activity.result.ActivityResultLauncher<Uri?>
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         savedCount = getSharedPreferences("doc_image_saver", MODE_PRIVATE).getInt("saved_count", 0)
         openMode = getSharedPreferences("doc_image_saver", MODE_PRIVATE).getString("open_mode", "APP") ?: "APP"
         multiPicker = registerForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris -> if (uris.isNotEmpty()) saveIncoming(uris) }
+        folderPicker = registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
+            if (uri != null) {
+                contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                getSharedPreferences("doc_image_saver", MODE_PRIVATE).edit().putString("whatsapp_folder_uri", uri.toString()).apply()
+                activityMessages.add(0, "WhatsApp folder connected")
+            }
+        }
         refreshGallery()
         setContent {
             MaterialTheme {
                 Surface(modifier = Modifier.fillMaxSize(), color = Ink) {
-                    DocImageHome(savedCount, failedCount, activityMessages, galleryImages, showLibrary, showSettings, openMode, selectedImage, { showLibrary = it; if (it) refreshGallery() }, { showSettings = it }, { mode -> openMode = mode; getSharedPreferences("doc_image_saver", MODE_PRIVATE).edit().putString("open_mode", mode).apply() }, { multiPicker.launch(arrayOf("*/*")) }, { uri, name -> if (openMode == "GALLERY") openSavedImage(uri) else selectedImage = uri to name }, { selectedImage = null })
+                    DocImageHome(savedCount, failedCount, activityMessages, galleryImages, showLibrary, showSettings, openMode, selectedImage, { showLibrary = it; if (it) refreshGallery() }, { showSettings = it }, { mode -> openMode = mode; getSharedPreferences("doc_image_saver", MODE_PRIVATE).edit().putString("open_mode", mode).apply() }, { multiPicker.launch(arrayOf("*/*")) }, { uri, name -> if (openMode == "GALLERY") openSavedImage(uri) else selectedImage = uri to name }, { selectedImage = null }, { folderPicker.launch(null) }, { syncWhatsAppFolder() }, { toggleFloatingBubble() })
                 }
             }
         }
         handleShareIntent(intent)
+        if (intent.getBooleanExtra(EXTRA_SYNC_NOW, false)) syncWhatsAppFolder()
     }
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
         handleShareIntent(intent)
+        if (intent.getBooleanExtra(EXTRA_SYNC_NOW, false)) syncWhatsAppFolder()
+    }
+
+    private fun toggleFloatingBubble() {
+        if (!Settings.canDrawOverlays(this)) {
+            startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName")))
+            activityMessages.add(0, "Allow display over other apps, then tap Enable floating bubble again.")
+            return
+        }
+        startService(Intent(this, FloatingSyncService::class.java))
+        activityMessages.add(0, "Floating sync bubble enabled")
+    }
+
+    private fun syncWhatsAppFolder() {
+        val raw = getSharedPreferences("doc_image_saver", MODE_PRIVATE).getString("whatsapp_folder_uri", null)
+        if (raw == null) {
+            activityMessages.add(0, "Connect the WhatsApp Documents folder in Settings first.")
+            showSettings = true
+            return
+        }
+        lifecycleScope.launch {
+            val result = withContext(Dispatchers.IO) { WhatsAppFolderSync(applicationContext).sync(Uri.parse(raw)) }
+            savedCount += result.saved
+            failedCount += result.failed
+            getSharedPreferences("doc_image_saver", MODE_PRIVATE).edit().putInt("saved_count", savedCount).apply()
+            activityMessages.add(0, "WhatsApp sync: ${result.saved} saved, ${result.skipped} already imported, ${result.failed} failed")
+            refreshGallery()
+        }
     }
 
     private fun handleShareIntent(intent: Intent?) {
@@ -177,6 +218,8 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    companion object { const val EXTRA_SYNC_NOW = "extra_sync_now" }
+
     private fun openSavedImage(uri: Uri) {
         val galleryIntent = Intent(Intent.ACTION_VIEW).apply {
             setDataAndType(uri, "image/*")
@@ -191,7 +234,7 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-private fun DocImageHome(savedCount: Int, failedCount: Int, activityMessages: List<String>, galleryImages: List<Pair<Uri, String>>, showLibrary: Boolean, showSettings: Boolean, openMode: String, selectedImage: Pair<Uri, String>?, onLibrary: (Boolean) -> Unit, onSettings: (Boolean) -> Unit, onMode: (String) -> Unit, onImport: () -> Unit, onOpen: (Uri, String) -> Unit, onCloseViewer: () -> Unit) {
+private fun DocImageHome(savedCount: Int, failedCount: Int, activityMessages: List<String>, galleryImages: List<Pair<Uri, String>>, showLibrary: Boolean, showSettings: Boolean, openMode: String, selectedImage: Pair<Uri, String>?, onLibrary: (Boolean) -> Unit, onSettings: (Boolean) -> Unit, onMode: (String) -> Unit, onImport: () -> Unit, onOpen: (Uri, String) -> Unit, onCloseViewer: () -> Unit, onChooseWhatsAppFolder: () -> Unit, onSyncWhatsApp: () -> Unit, onToggleFloating: () -> Unit) {
     val transition = rememberInfiniteTransition(label = "ambient")
     val drift by transition.animateFloat(
         initialValue = 0f,
@@ -349,6 +392,19 @@ private fun DocImageHome(savedCount: Int, failedCount: Int, activityMessages: Li
                             Text("Select several image files or image documents from Android's file picker, even when the sharing app only allows one document at a time.", color = Muted, fontSize = 11.sp, lineHeight = 17.sp)
                             Text("＋ Choose multiple files", color = Cyan, fontSize = 12.sp,
                                 modifier = Modifier.pointerInput(Unit) { detectTapGestures(onTap = { onImport() }) }.padding(vertical = 7.dp))
+                        }
+                    }
+                    GlassPanel(Modifier.fillMaxWidth(), RoundedCornerShape(22.dp), Cyan) {
+                        Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            Text("WhatsApp folder sync", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                            Text("Connect WhatsApp's Documents folder once. Sync scans its subfolders and copies new image files into your Gallery without recompression.", color = Muted, fontSize = 11.sp, lineHeight = 17.sp)
+                            Text("① Choose WhatsApp Documents folder", color = Cyan, fontSize = 12.sp,
+                                modifier = Modifier.pointerInput(Unit) { detectTapGestures(onTap = { onChooseWhatsAppFolder() }) }.padding(vertical = 5.dp))
+                            Text("② Sync WhatsApp images now", color = Cyan, fontSize = 12.sp,
+                                modifier = Modifier.pointerInput(Unit) { detectTapGestures(onTap = { onSyncWhatsApp() }) }.padding(vertical = 5.dp))
+                            Text("③ Enable floating sync bubble", color = Cyan, fontSize = 12.sp,
+                                modifier = Modifier.pointerInput(Unit) { detectTapGestures(onTap = { onToggleFloating() }) }.padding(vertical = 5.dp))
+                            Text("The bubble opens DocImageSaver and starts a sync. Android requires you to grant folder and overlay access.", color = Muted, fontSize = 10.sp, lineHeight = 15.sp)
                         }
                     }
                 }
