@@ -149,13 +149,29 @@ private fun DocImageHome(savedCount: Int, failedCount: Int, activityMessages: Li
                 uniform float2 resolution;
                 uniform float uScale;
                 uniform float uTime;
+                float hash21(float2 p) {
+                    p = fract(p * float2(123.34, 456.21));
+                    p += dot(p, p + 45.32);
+                    return fract(p.x * p.y);
+                }
+                float noise2(float2 p) {
+                    float2 i = floor(p);
+                    float2 f = fract(p);
+                    f = f * f * (3.0 - 2.0 * f);
+                    return mix(mix(hash21(i), hash21(i + float2(1.0, 0.0)), f.x),
+                               mix(hash21(i + float2(0.0, 1.0)), hash21(i + float2(1.0, 1.0)), f.x), f.y);
+                }
                 half4 main(float2 coord) {
                     float2 uv = coord / resolution;
-                    float2 offset = float2(
-                        sin(uv.y * 19.0 + uTime),
-                        cos(uv.x * 16.0 - uTime)
-                    ) * (uScale - 1.0) * 1.2;
-                    return content.eval(coord + offset);
+                    float2 p = uv * 5.0;
+                    float n1 = noise2(p + float2(uTime * 0.12, 0.0));
+                    float n2 = noise2(p * 1.8 + float2(4.7, -uTime * 0.10));
+                    float2 warp = float2(n1 - 0.5, n2 - 0.5);
+                    float2 offset = warp * (uScale - 1.0) * 4.0;
+                    half4 base = content.eval(coord + offset);
+                    half4 soft1 = content.eval(coord + offset + float2(1.2, 0.0));
+                    half4 soft2 = content.eval(coord + offset + float2(-1.2, 0.0));
+                    return base * 0.84 + (soft1 + soft2) * 0.08;
                 }
                 """.trimIndent()
             )
@@ -330,13 +346,30 @@ private fun GlassPanel(
                 uniform shader content;
                 uniform float2 resolution;
                 uniform float uScale;
+                float hash21(float2 p) {
+                    p = fract(p * float2(123.34, 456.21));
+                    p += dot(p, p + 45.32);
+                    return fract(p.x * p.y);
+                }
+                float noise2(float2 p) {
+                    float2 i = floor(p);
+                    float2 f = fract(p);
+                    f = f * f * (3.0 - 2.0 * f);
+                    return mix(mix(hash21(i), hash21(i + float2(1.0, 0.0)), f.x),
+                               mix(hash21(i + float2(0.0, 1.0)), hash21(i + float2(1.0, 1.0)), f.x), f.y);
+                }
                 half4 main(float2 coord) {
                     float2 uv = coord / resolution;
-                    float2 offset = float2(
-                        sin(uv.y * 34.0),
-                        cos(uv.x * 29.0)
-                    ) * (uScale - 1.0) * 0.85;
-                    return content.eval(coord + offset);
+                    float n1 = noise2(uv * 18.0);
+                    float n2 = noise2(uv * 37.0 + 8.4);
+                    float2 field = float2(n1 - 0.5, n2 - 0.5);
+                    float2 offset = field * (uScale - 1.0) * 3.2;
+                    half4 center = content.eval(coord + offset);
+                    half4 blurA = content.eval(coord + offset + float2(1.0, 0.0));
+                    half4 blurB = content.eval(coord + offset + float2(-1.0, 0.0));
+                    half4 blurC = content.eval(coord + offset + float2(0.0, 1.0));
+                    half4 blurD = content.eval(coord + offset + float2(0.0, -1.0));
+                    return center * 0.72 + (blurA + blurB + blurC + blurD) * 0.07;
                 }
                 """.trimIndent()
             )
