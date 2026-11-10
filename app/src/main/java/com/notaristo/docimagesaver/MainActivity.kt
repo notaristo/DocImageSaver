@@ -141,10 +141,40 @@ private fun DocImageHome(savedCount: Int, failedCount: Int, activityMessages: Li
         animationSpec = infiniteRepeatable(tween(7000, easing = FastOutSlowInEasing), RepeatMode.Reverse),
         label = "glowDrift"
     )
+    val backdropShader = remember {
+        if (android.os.Build.VERSION.SDK_INT >= 33) {
+            RuntimeShader(
+                """
+                uniform shader content;
+                uniform float2 resolution;
+                uniform float uScale;
+                uniform float uTime;
+                half4 main(float2 coord) {
+                    float2 uv = coord / resolution;
+                    float2 offset = float2(
+                        sin(uv.y * 19.0 + uTime),
+                        cos(uv.x * 16.0 - uTime)
+                    ) * (uScale - 1.0) * 1.2;
+                    return content.eval(coord + offset);
+                }
+                """.trimIndent()
+            )
+        } else null
+    }
 
     Box(
         Modifier.fillMaxSize()
             .background(Brush.verticalGradient(listOf(Color(0xFF17152F), Color(0xFF0D1021), Ink)))
+            .graphicsLayer {
+                if (android.os.Build.VERSION.SDK_INT >= 33 && backdropShader != null) {
+                    backdropShader.setFloatUniform("resolution", size.width.coerceAtLeast(1f), size.height.coerceAtLeast(1f))
+                    backdropShader.setFloatUniform("uScale", 1.4f)
+                    backdropShader.setFloatUniform("uTime", drift / 24f * 6.28318f)
+                    renderEffect = android.graphics.RenderEffect
+                        .createRuntimeShaderEffect(backdropShader, "content")
+                        .asComposeRenderEffect()
+                }
+            }
     ) {
         Box(
             Modifier.offset(x = 190.dp + drift.dp, y = (-95).dp)
