@@ -22,8 +22,8 @@ class ImageSaver(private val context: Context) {
             else -> null
         } ?: return SaveResult(originalName ?: "Unknown file", false, "The shared item is not a supported image.")
 
-        val originalName = originalName ?: ("Shared image" + extensionFor(mimeType))
-        val safeName = makeSafeFileName(originalName)
+        val finalName = originalName ?: ("Shared image" + extensionFor(mimeType))
+        val safeName = makeSafeFileName(finalName)
         val displayName = uniqueDisplayName(safeName, mimeType)
         val collection = MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
         val values = ContentValues().apply {
