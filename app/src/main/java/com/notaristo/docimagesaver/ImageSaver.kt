@@ -13,10 +13,16 @@ data class SaveResult(val fileName: String, val success: Boolean, val message: S
 class ImageSaver(private val context: Context) {
     fun save(uri: Uri): SaveResult {
         val resolver = context.contentResolver
-        val mimeType = resolver.getType(uri)?.takeIf { it.startsWith("image/") }
-            ?: return SaveResult("Unknown image", false, "The shared item is not a supported image.")
+        val originalName = queryDisplayName(uri)
+        val reportedMime = resolver.getType(uri)
+        val mimeType = when {
+            reportedMime?.startsWith("image/") == true -> reportedMime
+            reportedMime == null || reportedMime == "application/octet-stream" || reportedMime == "application/binary" ->
+                originalName?.let(::mimeTypeFromName)
+            else -> null
+        } ?: return SaveResult(originalName ?: "Unknown file", false, "The shared item is not a supported image.")
 
-        val originalName = queryDisplayName(uri) ?: ("Shared image" + extensionFor(mimeType))
+        val originalName = originalName ?: ("Shared image" + extensionFor(mimeType))
         val safeName = makeSafeFileName(originalName)
         val displayName = uniqueDisplayName(safeName, mimeType)
         val collection = MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
@@ -87,6 +93,20 @@ class ImageSaver(private val context: Context) {
             suffix++
         }
         return candidate
+    }
+
+    private fun mimeTypeFromName(name: String): String? {
+        return when (name.substringAfterLast('.', "").lowercase(Locale.ROOT)) {
+            "jpg", "jpeg" -> "image/jpeg"
+            "png" -> "image/png"
+            "webp" -> "image/webp"
+            "gif" -> "image/gif"
+            "heic" -> "image/heic"
+            "heif" -> "image/heif"
+            "bmp" -> "image/bmp"
+            "avif" -> "image/avif"
+            else -> null
+        }
     }
 
     private fun extensionFor(mimeType: String): String {
