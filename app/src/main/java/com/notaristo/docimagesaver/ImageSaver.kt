@@ -63,7 +63,7 @@ class ImageSaver(private val context: Context) {
     }
 
     private fun makeSafeFileName(name: String): String {
-        return name.substringAfterLast('/').replace(Regex("[\\\\\\u0000-\\u001F:*?\"<>|]"), "_")
+        return name.substringAfterLast('/').filterNot { it.isISOControl() || it in "/\\\\:*?\"<>|" }
             .ifBlank { "Shared image" }
     }
 
