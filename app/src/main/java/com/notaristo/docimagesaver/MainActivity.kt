@@ -2,6 +2,7 @@ package com.notaristo.docimagesaver
 
 import android.content.ClipData
 import android.content.Intent
+import android.graphics.RuntimeShader
 import android.net.Uri
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -9,6 +10,7 @@ import androidx.activity.compose.setContent
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
@@ -27,6 +29,7 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -38,11 +41,16 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.asComposeRenderEffect
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
@@ -280,17 +288,64 @@ private fun GlassPanel(
     accent: Color,
     content: @Composable () -> Unit
 ) {
+    val pressed = remember { mutableStateOf(false) }
+    val warp by animateFloatAsState(
+        targetValue = if (pressed.value) 1.4f else 1f,
+        animationSpec = tween(300, easing = FastOutSlowInEasing),
+        label = "glassDisplacement"
+    )
+    val shader = remember {
+        if (android.os.Build.VERSION.SDK_INT >= 33) {
+            RuntimeShader(
+                """
+                uniform shader content;
+                uniform float2 resolution;
+                uniform float uScale;
+                half4 main(float2 coord) {
+                    float2 uv = coord / resolution;
+                    float2 offset = float2(
+                        sin(uv.y * 34.0),
+                        cos(uv.x * 29.0)
+                    ) * (uScale - 1.0) * 0.85;
+                    return content.eval(coord + offset);
+                }
+                """.trimIndent()
+            )
+        } else null
+    }
+
     Box(
         modifier.shadow(22.dp, shape)
             .clip(shape)
-            .background(
-                Brush.linearGradient(
-                    listOf(Color(0x35FFFFFF), Color(0x17A5A4FF), Color(0x0DFFFFFF), Color(0x222D426A))
-                )
-            )
-            .background(Brush.verticalGradient(listOf(Color(0x16FFFFFF), Color(0x080A1428), Color(0x1AFFFFFF))))
             .border(BorderStroke(1.dp, Brush.linearGradient(listOf(Color(0x88FFFFFF), accent.copy(alpha = 0.38f), Color(0x20FFFFFF)))), shape)
+            .pointerInput(Unit) {
+                detectTapGestures(
+                    onPress = {
+                        pressed.value = true
+                        tryAwaitRelease()
+                        pressed.value = false
+                    }
+                )
+            }
     ) {
+        Box(
+            Modifier.matchParentSize()
+                .background(
+                    Brush.linearGradient(
+                        listOf(Color(0x35FFFFFF), Color(0x17A5A4FF), Color(0x0DFFFFFF), Color(0x222D426A))
+                    )
+                )
+                .background(Brush.verticalGradient(listOf(Color(0x16FFFFFF), Color(0x080A1428), Color(0x1AFFFFFF))))
+                .graphicsLayer {
+                    if (android.os.Build.VERSION.SDK_INT >= 33 && shader != null) {
+                        shader.setFloatUniform("resolution", size.width.coerceAtLeast(1f), size.height.coerceAtLeast(1f))
+                        shader.setFloatUniform("uScale", warp)
+                        renderEffect = android.graphics.RenderEffect
+                            .createRuntimeShaderEffect(shader, "content")
+                            .asComposeRenderEffect()
+                    }
+                }
+        )
         Box {
             Box(
                 Modifier.fillMaxWidth().height(1.dp)
