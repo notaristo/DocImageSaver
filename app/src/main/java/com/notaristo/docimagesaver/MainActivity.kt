@@ -133,7 +133,7 @@ class MainActivity : ComponentActivity() {
                 clip.getItemAt(index).uri?.let(::add)
             }
         }
-        val incoming = (streams + clipUris).distinct()
+        val incoming = (streams + clipUris + listOfNotNull(intent.data)).distinct()
         if (incoming.isEmpty()) return
         saveIncoming(incoming)
     }
