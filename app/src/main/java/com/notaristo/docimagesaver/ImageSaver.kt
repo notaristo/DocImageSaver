@@ -8,7 +8,7 @@ import android.provider.MediaStore
 import android.provider.OpenableColumns
 import java.util.Locale
 
-data class SaveResult(val fileName: String, val success: Boolean, val message: String)
+data class SaveResult(val fileName: String, val success: Boolean, val message: String, val uri: Uri? = null)
 
 class ImageSaver(private val context: Context) {
     fun save(uri: Uri): SaveResult {
@@ -44,7 +44,7 @@ class ImageSaver(private val context: Context) {
                 put(MediaStore.Images.Media.IS_PENDING, 0)
             }
             resolver.update(destination, publishValues, null, null)
-            SaveResult(displayName, true, "Saved to Pictures/Document Images")
+            SaveResult(displayName, true, "Saved to Pictures/Document Images", destination)
         } catch (error: Exception) {
             resolver.delete(destination, null, null)
             SaveResult(displayName, false, error.localizedMessage ?: "Could not save this image.")

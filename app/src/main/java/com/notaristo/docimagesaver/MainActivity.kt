@@ -74,6 +74,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        savedCount = getSharedPreferences("doc_image_saver", MODE_PRIVATE).getInt("saved_count", 0)
         setContent {
             MaterialTheme {
                 Surface(modifier = Modifier.fillMaxSize(), color = Ink) {
@@ -123,11 +124,30 @@ class MainActivity : ComponentActivity() {
                 incoming.map { saver.save(it) }
             }
             results.forEach { result ->
-                if (result.success) savedCount++ else failedCount++
+                if (result.success) {
+                    savedCount++
+                    getSharedPreferences("doc_image_saver", MODE_PRIVATE)
+                        .edit().putInt("saved_count", savedCount).apply()
+                } else {
+                    failedCount++
+                }
                 activityMessages.add(0, (if (result.success) "Saved  ·  " else "Could not save  ·  ") +
                     result.fileName + if (result.success) "" else " — " + result.message)
             }
             while (activityMessages.size > 12) activityMessages.removeAt(activityMessages.lastIndex)
+            results.firstOrNull { it.success && it.uri != null }?.uri?.let(::openSavedImage)
+        }
+    }
+
+    private fun openSavedImage(uri: Uri) {
+        val galleryIntent = Intent(Intent.ACTION_VIEW).apply {
+            setDataAndType(uri, "image/*")
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        try {
+            startActivity(galleryIntent)
+        } catch (_: android.content.ActivityNotFoundException) {
+            // The image remains saved even if no viewer app is installed.
         }
     }
 }
