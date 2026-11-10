@@ -83,6 +83,7 @@ class MainActivity : ComponentActivity() {
     private var showLibrary by mutableStateOf(false)
     private var showSettings by mutableStateOf(false)
     private val galleryImages = mutableStateListOf<Pair<Uri, String>>()
+    private var selectedImage by mutableStateOf<Pair<Uri, String>?>(null)
     private lateinit var multiPicker: androidx.activity.result.ActivityResultLauncher<Array<String>>
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -94,7 +95,7 @@ class MainActivity : ComponentActivity() {
         setContent {
             MaterialTheme {
                 Surface(modifier = Modifier.fillMaxSize(), color = Ink) {
-                    DocImageHome(savedCount, failedCount, activityMessages, galleryImages, showLibrary, showSettings, openMode, { showLibrary = it; if (it) refreshGallery() }, { showSettings = it }, { mode -> openMode = mode; getSharedPreferences("doc_image_saver", MODE_PRIVATE).edit().putString("open_mode", mode).apply() }, { multiPicker.launch(arrayOf("*/*")) }, { uri -> openSavedImage(uri) })
+                    DocImageHome(savedCount, failedCount, activityMessages, galleryImages, showLibrary, showSettings, openMode, selectedImage, { showLibrary = it; if (it) refreshGallery() }, { showSettings = it }, { mode -> openMode = mode; getSharedPreferences("doc_image_saver", MODE_PRIVATE).edit().putString("open_mode", mode).apply() }, { multiPicker.launch(arrayOf("*/*")) }, { uri, name -> if (openMode == "GALLERY") openSavedImage(uri) else selectedImage = uri to name }, { selectedImage = null })
                 }
             }
         }
@@ -190,7 +191,7 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-private fun DocImageHome(savedCount: Int, failedCount: Int, activityMessages: List<String>, galleryImages: List<Pair<Uri, String>>, showLibrary: Boolean, showSettings: Boolean, openMode: String, onLibrary: (Boolean) -> Unit, onSettings: (Boolean) -> Unit, onMode: (String) -> Unit, onImport: () -> Unit, onOpen: (Uri) -> Unit) {
+private fun DocImageHome(savedCount: Int, failedCount: Int, activityMessages: List<String>, galleryImages: List<Pair<Uri, String>>, showLibrary: Boolean, showSettings: Boolean, openMode: String, selectedImage: Pair<Uri, String>?, onLibrary: (Boolean) -> Unit, onSettings: (Boolean) -> Unit, onMode: (String) -> Unit, onImport: () -> Unit, onOpen: (Uri, String) -> Unit, onCloseViewer: () -> Unit) {
     val transition = rememberInfiniteTransition(label = "ambient")
     val drift by transition.animateFloat(
         initialValue = 0f,
@@ -447,7 +448,7 @@ private fun DocImageHome(savedCount: Int, failedCount: Int, activityMessages: Li
 }
 
 @Composable
-private fun SavedImageCard(uri: Uri, name: String, onOpen: (Uri) -> Unit) {
+private fun SavedImageCard(uri: Uri, name: String, onOpen: (Uri, String) -> Unit) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val bitmap by androidx.compose.runtime.produceState<Bitmap?>(initialValue = null, uri) {
         value = withContext(Dispatchers.IO) {
@@ -455,7 +456,7 @@ private fun SavedImageCard(uri: Uri, name: String, onOpen: (Uri) -> Unit) {
             catch (_: Exception) { null }
         }
     }
-    GlassPanel(Modifier.fillMaxWidth().pointerInput(uri) { detectTapGestures(onTap = { onOpen(uri) }) }, RoundedCornerShape(18.dp), Violet) {
+    GlassPanel(Modifier.fillMaxWidth().pointerInput(uri) { detectTapGestures(onTap = { onOpen(uri, name) }) }, RoundedCornerShape(18.dp), Violet) {
         Column {
             if (bitmap != null) Image(bitmap!!.asImageBitmap(), contentDescription = name,
                 modifier = Modifier.fillMaxWidth().height(150.dp).clip(RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp)), contentScale = ContentScale.Crop)
@@ -565,6 +566,36 @@ private fun StatPanel(label: String, value: String, caption: String, modifier: M
             Text(label, color = Color(0xFFB3B6D0), fontSize = 8.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.1.sp, maxLines = 1)
             Text(value, color = Color.White, fontSize = 30.sp, fontWeight = FontWeight.SemiBold, letterSpacing = (-1).sp)
             Text(caption, color = Color(0xFF8F95B3), fontSize = 10.sp)
+        }
+    }
+}
+
+
+@Composable
+private fun ImagePreview(uri: Uri, name: String, onClose: () -> Unit) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val bitmap by androidx.compose.runtime.produceState<Bitmap?>(initialValue = null, uri) {
+        value = withContext(Dispatchers.IO) {
+            try { context.contentResolver.loadThumbnail(uri, android.util.Size(1800, 1800), null) }
+            catch (_: Exception) { null }
+        }
+    }
+    Box(Modifier.fillMaxSize().background(Color(0xFF050610)).padding(18.dp)) {
+        Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text("‹", color = Color.White, fontSize = 34.sp,
+                    modifier = Modifier.pointerInput(Unit) { detectTapGestures(onTap = { onClose() }) }.padding(end = 16.dp))
+                Text(name, color = Color.White, fontSize = 13.sp, maxLines = 1,
+                    overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+            }
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                if (bitmap != null) {
+                    Image(bitmap!!.asImageBitmap(), contentDescription = name,
+                        modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Fit)
+                } else {
+                    Text("Image preview unavailable", color = Muted, fontSize = 13.sp)
+                }
+            }
         }
     }
 }

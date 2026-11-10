@@ -13,17 +13,16 @@ data class SaveResult(val fileName: String, val success: Boolean, val message: S
 class ImageSaver(private val context: Context) {
     fun save(uri: Uri): SaveResult {
         val resolver = context.contentResolver
-        val originalName = queryDisplayName(uri)
+        val displayNameFromSource = queryDisplayName(uri)
         val reportedMime = resolver.getType(uri)
         val mimeType = when {
             reportedMime?.startsWith("image/") == true -> reportedMime
             reportedMime == null || reportedMime == "application/octet-stream" || reportedMime == "application/binary" ->
-                originalName?.let(::mimeTypeFromName)
+                displayNameFromSource?.let(::mimeTypeFromName)
             else -> null
-        } ?: return SaveResult(originalName ?: "Unknown file", false, "The shared item is not a supported image.")
+        } ?: return SaveResult(displayNameFromSource ?: "Unknown file", false, "The selected file is not a supported image.")
 
-        val finalName = originalName ?: ("Shared image" + extensionFor(mimeType))
-        val safeName = makeSafeFileName(finalName)
+        val safeName = makeSafeFileName(displayNameFromSource ?: ("Shared image" + extensionFor(mimeType)))
         val displayName = uniqueDisplayName(safeName, mimeType)
         val collection = MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
         val values = ContentValues().apply {
@@ -36,19 +35,10 @@ class ImageSaver(private val context: Context) {
             ?: return SaveResult(displayName, false, "Android could not create the gallery file.")
 
         return try {
-            val input = resolver.openInputStream(uri)
-                ?: throw IllegalStateException("The source image could not be opened.")
-            val output = resolver.openOutputStream(destination, "w")
-                ?: throw IllegalStateException("The destination image could not be opened.")
-            input.use { source ->
-                output.use { target ->
-                    source.copyTo(target, DEFAULT_BUFFER_SIZE)
-                    target.flush()
-                }
-            }
-            val publishValues = ContentValues().apply {
-                put(MediaStore.Images.Media.IS_PENDING, 0)
-            }
+            val input = resolver.openInputStream(uri) ?: throw IllegalStateException("The source file could not be opened.")
+            val output = resolver.openOutputStream(destination, "w") ?: throw IllegalStateException("The destination file could not be opened.")
+            input.use { source -> output.use { target -> source.copyTo(target); target.flush() } }
+            val publishValues = ContentValues().apply { put(MediaStore.Images.Media.IS_PENDING, 0) }
             resolver.update(destination, publishValues, null, null)
             SaveResult(displayName, true, "Saved to Pictures/Document Images", destination)
         } catch (error: Exception) {
@@ -58,9 +48,11 @@ class ImageSaver(private val context: Context) {
     }
 
     private fun queryDisplayName(uri: Uri): String? {
-        return context.contentResolver.query(
-            uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null
-        )?.use { cursor ->
+        return resolverQueryName(uri)
+    }
+
+    private fun resolverQueryName(uri: Uri): String? {
+        return context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
             if (cursor.moveToFirst()) {
                 val index = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
                 if (index >= 0) cursor.getString(index) else null
@@ -68,10 +60,8 @@ class ImageSaver(private val context: Context) {
         }
     }
 
-    private fun makeSafeFileName(name: String): String {
-        return name.substringAfterLast('/').filterNot { it.isISOControl() || it in "/\\\\:*?\"<>|" }
-            .ifBlank { "Shared image" }
-    }
+    private fun makeSafeFileName(name: String): String =
+        name.substringAfterLast('/').filterNot { it.isISOControl() || it in "/\\\\:*?\"<>|" }.ifBlank { "Shared image" }
 
     private fun uniqueDisplayName(name: String, mimeType: String): String {
         val dot = name.lastIndexOf('.')
@@ -81,45 +71,36 @@ class ImageSaver(private val context: Context) {
         val collection = MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
         var candidate = base + extension
         var suffix = 1
-        while (context.contentResolver.query(
-                collection,
-                arrayOf(MediaStore.Images.Media._ID),
-                MediaStore.Images.Media.RELATIVE_PATH + "=? AND " + MediaStore.Images.Media.DISPLAY_NAME + "=?",
-                arrayOf(Environment.DIRECTORY_PICTURES + "/Document Images/", candidate),
-                null
-            )?.use { it.moveToFirst() } == true
-        ) {
+        while (context.contentResolver.query(collection, arrayOf(MediaStore.Images.Media._ID),
+            MediaStore.Images.Media.RELATIVE_PATH + "=? AND " + MediaStore.Images.Media.DISPLAY_NAME + "=?",
+            arrayOf(Environment.DIRECTORY_PICTURES + "/Document Images/", candidate), null)?.use { it.moveToFirst() } == true) {
             candidate = base + " (" + suffix + ")" + extension
             suffix++
         }
         return candidate
     }
 
-    private fun mimeTypeFromName(name: String): String? {
-        return when (name.substringAfterLast('.', "").lowercase(Locale.ROOT)) {
-            "jpg", "jpeg" -> "image/jpeg"
-            "png" -> "image/png"
-            "webp" -> "image/webp"
-            "gif" -> "image/gif"
-            "heic" -> "image/heic"
-            "heif" -> "image/heif"
-            "bmp" -> "image/bmp"
-            "avif" -> "image/avif"
-            else -> null
-        }
+    private fun mimeTypeFromName(name: String): String? = when (name.substringAfterLast('.', "").lowercase(Locale.ROOT)) {
+        "jpg", "jpeg" -> "image/jpeg"
+        "png" -> "image/png"
+        "webp" -> "image/webp"
+        "gif" -> "image/gif"
+        "heic" -> "image/heic"
+        "heif" -> "image/heif"
+        "bmp" -> "image/bmp"
+        "avif" -> "image/avif"
+        else -> null
     }
 
-    private fun extensionFor(mimeType: String): String {
-        return when (mimeType.lowercase(Locale.ROOT)) {
-            "image/jpeg", "image/jpg" -> ".jpg"
-            "image/png" -> ".png"
-            "image/webp" -> ".webp"
-            "image/gif" -> ".gif"
-            "image/heic" -> ".heic"
-            "image/heif" -> ".heif"
-            "image/bmp" -> ".bmp"
-            "image/avif" -> ".avif"
-            else -> ".img"
-        }
+    private fun extensionFor(mimeType: String): String = when (mimeType.lowercase(Locale.ROOT)) {
+        "image/jpeg", "image/jpg" -> ".jpg"
+        "image/png" -> ".png"
+        "image/webp" -> ".webp"
+        "image/gif" -> ".gif"
+        "image/heic" -> ".heic"
+        "image/heif" -> ".heif"
+        "image/bmp" -> ".bmp"
+        "image/avif" -> ".avif"
+        else -> ".img"
     }
 }
