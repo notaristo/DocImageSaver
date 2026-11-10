@@ -157,7 +157,7 @@ class MainActivity : ComponentActivity() {
             }
             while (activityMessages.size > 12) activityMessages.removeAt(activityMessages.lastIndex)
             refreshGallery()
-            results.firstOrNull { it.success && it.uri != null }?.uri?.let { uri -> if (openMode == "GALLERY") openSavedImage(uri) else showLibrary = true }
+            results.firstOrNull { it.success && it.uri != null }?.let { result -> if (openMode == "GALLERY") openSavedImage(result.uri!!) else selectedImage = result.uri!! to result.fileName }
         }
     }
 
