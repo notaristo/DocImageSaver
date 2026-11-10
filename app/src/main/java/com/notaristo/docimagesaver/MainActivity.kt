@@ -84,6 +84,8 @@ class MainActivity : ComponentActivity() {
     private var savedCount by mutableIntStateOf(0)
     private var failedCount by mutableIntStateOf(0)
     private var openMode by mutableStateOf("APP")
+    private var batchMode by mutableStateOf(false)
+    private var batchSavedCount by mutableIntStateOf(0)
     private var showLibrary by mutableStateOf(false)
     private var showSettings by mutableStateOf(false)
     private val galleryImages = mutableStateListOf<Pair<Uri, String>>()
@@ -95,6 +97,8 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         savedCount = getSharedPreferences("doc_image_saver", MODE_PRIVATE).getInt("saved_count", 0)
         openMode = getSharedPreferences("doc_image_saver", MODE_PRIVATE).getString("open_mode", "APP") ?: "APP"
+        batchMode = getSharedPreferences("doc_image_saver", MODE_PRIVATE).getBoolean("batch_mode", false)
+        batchSavedCount = getSharedPreferences("doc_image_saver", MODE_PRIVATE).getInt("batch_saved_count", 0)
         multiPicker = registerForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris -> if (uris.isNotEmpty()) saveIncoming(uris) }
         folderPicker = registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
             if (uri != null) {
@@ -107,7 +111,7 @@ class MainActivity : ComponentActivity() {
         setContent {
             MaterialTheme {
                 Surface(modifier = Modifier.fillMaxSize(), color = Ink) {
-                    DocImageHome(savedCount, failedCount, activityMessages, galleryImages, showLibrary, showSettings, openMode, selectedImage, { showLibrary = it; if (it) refreshGallery() }, { showSettings = it }, { mode -> openMode = mode; getSharedPreferences("doc_image_saver", MODE_PRIVATE).edit().putString("open_mode", mode).apply() }, { multiPicker.launch(arrayOf("*/*")) }, { uri, name -> if (openMode == "GALLERY") openSavedImage(uri) else selectedImage = uri to name }, { selectedImage = null }, { folderPicker.launch(null) }, { syncWhatsAppFolder() }, { toggleFloatingBubble() })
+                    DocImageHome(savedCount, failedCount, activityMessages, galleryImages, showLibrary, showSettings, openMode, selectedImage, { showLibrary = it; if (it) refreshGallery() }, { showSettings = it }, { mode -> openMode = mode; getSharedPreferences("doc_image_saver", MODE_PRIVATE).edit().putString("open_mode", mode).apply() }, { multiPicker.launch(arrayOf("*/*")) }, { uri, name -> if (openMode == "GALLERY") openSavedImage(uri) else selectedImage = uri to name }, { selectedImage = null }, { folderPicker.launch(null) }, { syncWhatsAppFolder() }, { toggleFloatingBubble() }, batchMode, batchSavedCount, { startBatchMode() }, { finishBatchMode() })
                 }
             }
         }
@@ -149,6 +153,24 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private fun startBatchMode() {
+        batchMode = true
+        batchSavedCount = 0
+        getSharedPreferences("doc_image_saver", MODE_PRIVATE).edit().putBoolean("batch_mode", true).putInt("batch_saved_count", 0).apply()
+        activityMessages.add(0, "Batch collection started. Share images one at a time from WhatsApp.")
+        showSettings = true
+        showLibrary = false
+    }
+
+    private fun finishBatchMode() {
+        batchMode = false
+        getSharedPreferences("doc_image_saver", MODE_PRIVATE).edit().putBoolean("batch_mode", false).apply()
+        activityMessages.add(0, "Batch complete: $batchSavedCount images collected. They are in My images and your Gallery.")
+        showSettings = false
+        showLibrary = true
+        refreshGallery()
+    }
+
     private fun handleShareIntent(intent: Intent?) {
         if (intent == null) return
         val streams = when (intent.action) {
@@ -188,6 +210,10 @@ class MainActivity : ComponentActivity() {
             results.forEach { result ->
                 if (result.success) {
                     savedCount++
+                    if (batchMode) {
+                        batchSavedCount++
+                        getSharedPreferences("doc_image_saver", MODE_PRIVATE).edit().putInt("batch_saved_count", batchSavedCount).apply()
+                    }
                     getSharedPreferences("doc_image_saver", MODE_PRIVATE)
                         .edit().putInt("saved_count", savedCount).apply()
                 } else {
@@ -198,7 +224,11 @@ class MainActivity : ComponentActivity() {
             }
             while (activityMessages.size > 12) activityMessages.removeAt(activityMessages.lastIndex)
             refreshGallery()
-            results.firstOrNull { it.success && it.uri != null }?.let { result -> if (openMode == "GALLERY") openSavedImage(result.uri!!) else selectedImage = result.uri!! to result.fileName }
+            if (!batchMode) {
+                results.firstOrNull { it.success && it.uri != null }?.let { result -> if (openMode == "GALLERY") openSavedImage(result.uri!!) else selectedImage = result.uri!! to result.fileName }
+            } else {
+                activityMessages.add(0, "Batch collection: $batchSavedCount images saved so far.")
+            }
         }
     }
 
@@ -234,7 +264,7 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-private fun DocImageHome(savedCount: Int, failedCount: Int, activityMessages: List<String>, galleryImages: List<Pair<Uri, String>>, showLibrary: Boolean, showSettings: Boolean, openMode: String, selectedImage: Pair<Uri, String>?, onLibrary: (Boolean) -> Unit, onSettings: (Boolean) -> Unit, onMode: (String) -> Unit, onImport: () -> Unit, onOpen: (Uri, String) -> Unit, onCloseViewer: () -> Unit, onChooseWhatsAppFolder: () -> Unit, onSyncWhatsApp: () -> Unit, onToggleFloating: () -> Unit) {
+private fun DocImageHome(savedCount: Int, failedCount: Int, activityMessages: List<String>, galleryImages: List<Pair<Uri, String>>, showLibrary: Boolean, showSettings: Boolean, openMode: String, selectedImage: Pair<Uri, String>?, onLibrary: (Boolean) -> Unit, onSettings: (Boolean) -> Unit, onMode: (String) -> Unit, onImport: () -> Unit, onOpen: (Uri, String) -> Unit, onCloseViewer: () -> Unit, onChooseWhatsAppFolder: () -> Unit, onSyncWhatsApp: () -> Unit, onToggleFloating: () -> Unit, batchMode: Boolean, batchSavedCount: Int, onStartBatch: () -> Unit, onFinishBatch: () -> Unit) {
     val transition = rememberInfiniteTransition(label = "ambient")
     val drift by transition.animateFloat(
         initialValue = 0f,
@@ -383,6 +413,18 @@ private fun DocImageHome(savedCount: Int, failedCount: Int, activityMessages: Li
                                         Text(if (mode == "APP") "View in app" else "Open gallery", color = if (active) Color.White else Muted, fontSize = 11.sp)
                                     }
                                 }
+                            }
+                        }
+                    }
+                    GlassPanel(Modifier.fillMaxWidth(), RoundedCornerShape(22.dp), Violet) {
+                        Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            Text("WhatsApp batch collection", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                            Text(if (batchMode) "Collection is active. Share each WhatsApp image to DocImageSaver individually. Saved images will not open one by one." else "Start a collection, then share images from WhatsApp to DocImageSaver one at a time. Finish when you have sent them all.", color = Muted, fontSize = 11.sp, lineHeight = 17.sp)
+                            if (batchMode) {
+                                Text("$batchSavedCount images collected", color = Cyan, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                                Text("✓ Finish batch and view images", color = Cyan, fontSize = 12.sp, modifier = Modifier.pointerInput(batchSavedCount) { detectTapGestures(onTap = { onFinishBatch() }) }.padding(vertical = 7.dp))
+                            } else {
+                                Text("＋ Start batch collection", color = Cyan, fontSize = 12.sp, modifier = Modifier.pointerInput(Unit) { detectTapGestures(onTap = { onStartBatch() }) }.padding(vertical = 7.dp))
                             }
                         }
                     }
